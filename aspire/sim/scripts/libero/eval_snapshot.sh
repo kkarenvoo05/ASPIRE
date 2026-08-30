@@ -57,10 +57,16 @@ if [[ "$code_count" -eq 0 ]]; then
     exit 1
 fi
 
-# Check perception servers
+# Check perception servers.
+# curl -w '%{http_code}' already prints "000" on a refused connection *and*
+# exits nonzero, so a `|| echo "000"` fallback appends a second copy and $code
+# becomes "000000" -- never equal to "000", so this guard could never fire and
+# eval proceeded against dead servers. Use `|| true` to satisfy `set -e`
+# without adding to curl's own output. These servers have no /health route, so
+# a 404 here is the normal ready signal; only "000" means not listening.
 for p in 8114 8115 8116; do
-    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:$p/health 2>/dev/null || echo "000")
-    if [[ "$code" == "000" ]]; then
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:$p/health" 2>/dev/null || true)
+    if [[ -z "$code" || "$code" == "000" ]]; then
         echo "ERROR: perception server on port $p is DOWN" >&2
         exit 1
     fi
