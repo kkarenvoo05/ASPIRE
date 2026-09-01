@@ -142,8 +142,15 @@ printf "\r  Checking servers...      \n"
 
 ALL_OK=true
 for port in 8114 8115 8116; do
-  CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:$port/health" 2>/dev/null || echo "000")
-  if [[ "$CODE" == "000" ]]; then
+  # curl -w '%{http_code}' already prints "000" on a refused connection *and*
+  # exits nonzero, so a `|| echo "000"` fallback appends a second copy and CODE
+  # becomes "000000" -- never equal to "000", so the DOWN branch below was
+  # unreachable and this gate reported servers UP precisely when they were
+  # down. `|| true` satisfies `set -e` without adding to curl's own output.
+  # These servers have no /health route, so a 404 is the normal ready signal;
+  # only "000" means not listening.
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:$port/health" 2>/dev/null || true)
+  if [[ -z "$CODE" || "$CODE" == "000" ]]; then
     case $port in
       8114) LOG=/tmp/sam3.log; NAME=SAM3 ;;
       8115) LOG=/tmp/graspnet.log; NAME=GraspNet ;;
@@ -151,7 +158,7 @@ for port in 8114 8115 8116; do
     esac
     echo "FAIL port $port ($NAME): DOWN"
     echo "  Last 5 lines of $LOG:"
-    tail -5 "$LOG" | sed 's/^/    /'
+    tail -5 "$LOG" 2>/dev/null | sed 's/^/    /' || true
     ALL_OK=false
   else
     case $port in
